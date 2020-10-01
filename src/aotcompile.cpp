@@ -276,6 +276,8 @@ static void jl_ci_cache_lookup(const jl_cgparams_t &cgparams, jl_method_instance
     *ci_out = codeinst;
 }
 
+extern "C" uint64_t jl_cumulative_compile_time;
+
 // takes the running content that has collected in the shadow module and dump it to disk
 // this builds the object file portion of the sysimage files for fast startup, and can
 // also be used be extern consumers like GPUCompiler.jl to obtain a module containing
@@ -292,6 +294,7 @@ void *jl_create_native(jl_array_t *methods, const jl_cgparams_t cgparams, int _p
     jl_code_info_t *src = NULL;
     JL_GC_PUSH1(&src);
     JL_LOCK(&codegen_lock);
+    uint64_t compiler_start_time = jl_hrtime();
 
     CompilationPolicy policy = (CompilationPolicy) _policy;
     std::unique_ptr<Module> clone(jl_create_llvm_module("text"));
@@ -415,6 +418,7 @@ void *jl_create_native(jl_array_t *methods, const jl_cgparams_t cgparams, int _p
 
     data->M = std::move(clone);
 
+    jl_cumulative_compile_time += (jl_hrtime() - compiler_start_time);
     JL_UNLOCK(&codegen_lock); // Might GC
     return (void*)data;
 }
@@ -878,6 +882,7 @@ void *jl_get_llvmf_defn(jl_method_instance_t *mi, size_t world, char getwrapper,
         std::unique_ptr<Module> m;
         jl_llvm_functions_t decls;
         JL_LOCK(&codegen_lock);
+        uint64_t compiler_start_time = jl_hrtime();
         std::tie(m, decls) = jl_emit_code(mi, src, jlrettype, output);
 
         Function *F = NULL;
@@ -901,6 +906,7 @@ void *jl_get_llvmf_defn(jl_method_instance_t *mi, size_t world, char getwrapper,
             m.release(); // the return object `llvmf` will be the owning pointer
         }
         JL_GC_POP();
+        jl_cumulative_compile_time += (jl_hrtime() - compiler_start_time);
         JL_UNLOCK(&codegen_lock); // Might GC
         if (F)
             return F;
